@@ -6,9 +6,6 @@ using System.Diagnostics;
 using Newtonsoft.Json;
 using NeoSmart.PrettySize;
 
-using static FileUtils;
-using static IMetadata;
-
 namespace VideoCompressor
 {
     internal class Program
@@ -22,10 +19,11 @@ namespace VideoCompressor
             {
                 Console.WriteLine("[LOG/CRITICAL] FFmpeg couldn't be found! Downloading...");
                 DownloadFFmpeg();
-            } else
+            }
+            else
             {
                 Console.WriteLine("[LOG/INFO] FFmpeg was found! Ready to compress.");
-                
+
                 Console.Write("\nPlease enter the name of the file to be compressed: ");
                 string filename = Console.ReadLine();
 
@@ -59,10 +57,10 @@ namespace VideoCompressor
                 Console.Clear();
                 Console.WriteLine("[LOG/SUCCESS] Compressing...");
                 Console.WriteLine("[LOG/INFO] At the end of the process, you can find the compressed file in the dist folder.");
-                
+
                 StartCompress(filename, preset, codec);
             }
-          
+
         }
 
         private static bool IsPreset(string preset)
@@ -105,9 +103,12 @@ namespace VideoCompressor
             return false;
         }
 
-        private static long GetNewBitrate(string bitrate, string preset) {
+        private static long GetNewBitrate(string bitrate, string preset)
+        {
             switch (preset)
             {
+                case "veryLow":
+                    return (long)(Convert.ToInt64(bitrate) / 1.3);
                 case "low":
                     return (long)(Convert.ToInt64(bitrate) / 1.6);
                 case "medium":
@@ -123,25 +124,37 @@ namespace VideoCompressor
             }
         }
 
-        private static void StartCompress(string filename, string preset, string codec)
-        {
-            Console.WriteLine("[LOG/INFO] Generating metadata...");
-            Process OldMetadataProcess = new Process()
+        private static void GenerateMetadata(string videoPath, string metadataFilename) {
+            Process MetadataProcess = new Process()
             {
                 StartInfo = new ProcessStartInfo()
                 {
                     FileName = "cmd.exe",
                     WorkingDirectory = $"{FileUtils.GetCurrentDirectory()}\\bin",
-                    Arguments = $"/C ffprobe -v quiet -print_format json -show_format -hide_banner \"{FileUtils.GetCurrentDirectory()}\\{filename}\" > \"{FileUtils.GetCurrentDirectory()}\\temp\\old-metadata-{filename}.json\"",
-
+                    Arguments = $"/C ffprobe -v quiet -print_format json -show_format -hide_banner \"{FileUtils.GetCurrentDirectory()}\\{videoPath}\" > \"{FileUtils.GetCurrentDirectory()}\\temp\\{metadataFilename}.json\"",
+                    WindowStyle = ProcessWindowStyle.Hidden
                 }
             };
 
-            OldMetadataProcess.Start();
-            OldMetadataProcess.WaitForExit();
+            MetadataProcess.Start();
+            MetadataProcess.WaitForExit();
+        }
 
+        private static IFormat ParseMetadata(string filename) {
+            return JsonConvert.DeserializeObject<IMetadata>(File.ReadAllText($"{FileUtils.GetCurrentDirectory()}\\temp\\{filename}.json")).format;
+        }
+
+        private static void StartCompress(string filename, string preset, string codec)
+        {
+            Console.WriteLine("[LOG/INFO] Generating metadata...");
+            GenerateMetadata(filename, $"old-metadata-{filename}");
             Console.WriteLine("[LOG/SUCCESS] Metadata was generated. Contiuning the compress...");
-            IFormat OldMetadata = JsonConvert.DeserializeObject<IMetadata>(File.ReadAllText($"{FileUtils.GetCurrentDirectory()}\\temp\\old-metadata-{filename}.json")).format;
+            
+            IFormat OldMetadata = ParseMetadata($"old-metadata-{filename}");
+
+            if (File.Exists($"{FileUtils.GetCurrentDirectory()}\\dist\\{filename}")) {
+                File.Delete($"{FileUtils.GetCurrentDirectory()}\\dist\\{filename}");
+            }
 
             Process CompressProcess = new Process()
             {
@@ -150,6 +163,7 @@ namespace VideoCompressor
                     FileName = "cmd.exe",
                     WorkingDirectory = $"{FileUtils.GetCurrentDirectory()}\\bin",
                     Arguments = $"/C ffmpeg -i ../{filename} -preset slow -hide_banner -c:v lib{codec} -b:v {GetNewBitrate(OldMetadata.bit_rate, preset)} ../dist/{filename}",
+                    WindowStyle = ProcessWindowStyle.Hidden
                 }
             };
 
@@ -157,28 +171,15 @@ namespace VideoCompressor
             CompressProcess.WaitForExit();
 
             Console.WriteLine("[LOG/SUCCESS] Video was compressed. Generating new metadata to finish...");
-
-            Process NewMetadataProcess = new Process()
-            {
-                StartInfo = new ProcessStartInfo()
-                {
-                    FileName = "cmd.exe",
-                    WorkingDirectory = $"{FileUtils.GetCurrentDirectory()}\\bin",
-                    Arguments = $"/C ffprobe -v quiet -print_format json -show_format -hide_banner \"{FileUtils.GetCurrentDirectory()}\\dist\\{filename}\" > \"{FileUtils.GetCurrentDirectory()}\\temp\\new-metadata-{filename}.json\"",
-
-                }
-            };
-
-            NewMetadataProcess.Start();
-            NewMetadataProcess.WaitForExit();
-
+            GenerateMetadata($"dist\\{filename}", $"new-metadata-{filename}");
             Console.WriteLine("[LOG/SUCCESS] New metadata was generated. Creating the finish info...");
-            IFormat NewMetadata = JsonConvert.DeserializeObject<IMetadata>(File.ReadAllText($"{FileUtils.GetCurrentDirectory()}\\temp\\new-metadata-{filename}.json")).format;
-
-            int CompressRatio = ((int)((Convert.ToInt64(OldMetadata.size) - Convert.ToInt64(NewMetadata.size)) / (Convert.ToInt64(NewMetadata.size)) * 100));
             
+            IFormat NewMetadata = ParseMetadata($"new-metadata-{filename}");
+
+            string CompressRatio = ((float)((float.Parse(OldMetadata.size) - float.Parse(NewMetadata.size)) / (float.Parse(NewMetadata.size)) * 100)).ToString("0.00");
+
             Console.Clear();
-            Console.WriteLine("[LOG/SUCCESS] Finish!\n");
+            Console.WriteLine("[LOG/SUCCESS] Finish!");
             Console.WriteLine($"[LOG/INFO] Old size: {PrettySize.Format(Convert.ToInt64(OldMetadata.size))}");
             Console.WriteLine($"[LOG/INFO] New size: {PrettySize.Format(Convert.ToInt64(NewMetadata.size))}");
             Console.WriteLine($"[LOG/INFO] Compression ratio: %{CompressRatio}");
@@ -215,7 +216,7 @@ namespace VideoCompressor
 
         private static void DownloadFFmpeg()
         {
-            
+
 
             using (WebClient client = new WebClient())
             {

@@ -1,6 +1,4 @@
-﻿using static IFormat;
-
-class IMetadata
+﻿class IMetadata
 {
     public IFormat format;
 }

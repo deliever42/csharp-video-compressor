@@ -1,6 +1,4 @@
-﻿using static ITags;
-
-class IFormat
+﻿class IFormat
 {
     public string filename;
     public int nb_streams;
